@@ -17,7 +17,9 @@ Topstep practice account.
 - TP1: VWAP ± 1.28σ, exit 5 contracts; stop unchanged.
 - TP2: VWAP ± 2.01σ, exit 3 contracts; move the remaining stop to breakeven.
 - TP3: VWAP ± 2.51σ, exit the final 2 contracts.
-- Exit remaining contracts on an adverse closed-bar EMA15/EMA20 crossover.
+- On an adverse closed-bar EMA12/EMA20 crossover, keep the trade open and
+  tighten the stop to the broken range boundary (range high for longs, range
+  low for shorts). Never loosen an existing breakeven stop.
 - Exit any remaining contracts at the originating session's end.
 - Maximum one trade per session.
 

@@ -46,6 +46,9 @@ class SessionRangeEmaExecutor:
         self.stop_order_id = raw.get("stop_order_id")
         self.broker_remaining = int(raw.get("broker_remaining", 0))
         self.applied_target_index = int(raw.get("applied_target_index", 0))
+        self.applied_stop = (
+            float(raw["applied_stop"]) if raw.get("applied_stop") is not None else None
+        )
         self.placed = int(raw.get("placed", 0))
         self.failed = int(raw.get("failed", 0))
         self.last_error = raw.get("last_error")
@@ -59,6 +62,7 @@ class SessionRangeEmaExecutor:
             "stop_order_id": self.stop_order_id,
             "broker_remaining": self.broker_remaining,
             "applied_target_index": self.applied_target_index,
+            "applied_stop": self.applied_stop,
             "placed": self.placed,
             "failed": self.failed,
             "last_error": self.last_error,
@@ -218,6 +222,7 @@ class SessionRangeEmaExecutor:
             self.active_signal_id = signal_id
             self.broker_remaining = 10
             self.applied_target_index = 0
+            self.applied_stop = float(lifecycle.stop)
             self.placed += 1
             self.last_error = None
             self._persist()
@@ -265,18 +270,24 @@ class SessionRangeEmaExecutor:
 
     async def _sync_partial_targets(self, lifecycle) -> None:
         desired = int(lifecycle.contracts_remaining)
-        if desired >= self.broker_remaining:
+        qty = max(0, self.broker_remaining - desired)
+        stop_changed = (
+            self.applied_stop is None
+            or float(lifecycle.stop) != float(self.applied_stop)
+        )
+        if qty == 0 and not stop_changed:
             return
-        qty = self.broker_remaining - desired
         side_exit = 1 if lifecycle.side == "long" else 0
         try:
-            scale = await self.orders.place_market_order(
-                contract_id=self.contract_id,
-                side=side_exit,
-                size=qty,
-                account_id=self.account_id,
-            )
-            scale_order_id = response_order_id(scale)
+            scale_order_id = None
+            if qty:
+                scale = await self.orders.place_market_order(
+                    contract_id=self.contract_id,
+                    side=side_exit,
+                    size=qty,
+                    account_id=self.account_id,
+                )
+                scale_order_id = response_order_id(scale)
             await self._cancel_stop()
             self.stop_order_id = None
             if desired:
@@ -290,14 +301,19 @@ class SessionRangeEmaExecutor:
                 self.stop_order_id = response_order_id(stop)
             self.broker_remaining = desired
             self.applied_target_index = int(lifecycle.next_target_index)
+            self.applied_stop = float(lifecycle.stop)
             self._persist()
             self.notify(
-                f"📉 **TOPSTEP PRAC SCALE-OUT #{lifecycle.signal_id}** · "
-                f"`{qty}` MNQ market exit · `{desired}` remain · "
-                f"SL `{lifecycle.stop:.2f}` · order `{scale_order_id}`"
+                f"🛡️ **TOPSTEP PRAC PROTECTION UPDATE #{lifecycle.signal_id}** · "
+                + (
+                    f"`{qty}` MNQ market exit · `{desired}` remain · "
+                    if qty else f"`{desired}` MNQ remain · "
+                )
+                + f"SL `{lifecycle.stop:.2f}`"
+                + (f" · scale order `{scale_order_id}`" if scale_order_id else "")
             )
             self.adapter.audit.event(
-                "broker_scale_out",
+                "broker_protection_update",
                 mode="TOPSTEP_PRAC",
                 signal_id=lifecycle.signal_id,
                 size=qty,
@@ -415,6 +431,7 @@ class SessionRangeEmaExecutor:
         self.stop_order_id = None
         self.broker_remaining = 0
         self.applied_target_index = 0
+        self.applied_stop = None
 
     def status(self) -> dict:
         return {

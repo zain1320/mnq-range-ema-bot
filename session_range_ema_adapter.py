@@ -286,18 +286,43 @@ class SessionRangeEmaAdapter:
             if len(frame_5m.loc[:completed_ts]) >= 2:
                 previous = frame_5m.loc[:completed_ts].iloc[-2]
                 crossed = (
-                    float(previous.ema15) >= float(previous.ema20)
-                    and float(bar.ema15) < float(bar.ema20)
+                    float(previous.ema12) >= float(previous.ema20)
+                    and float(bar.ema12) < float(bar.ema20)
                     if lc.direction == 1
-                    else float(previous.ema15) <= float(previous.ema20)
-                    and float(bar.ema15) > float(bar.ema20)
+                    else float(previous.ema12) <= float(previous.ema20)
+                    and float(bar.ema12) > float(bar.ema20)
                 )
                 if crossed:
-                    self._finish_remaining(
-                        completed_ts + pd.Timedelta(minutes=5),
-                        float(bar.close),
-                        "ema15_ema20_cross",
+                    boundary_stop = (
+                        float(state.range_high)
+                        if lc.direction == 1
+                        else float(state.range_low)
                     )
+                    new_stop = (
+                        max(lc.stop, boundary_stop)
+                        if lc.direction == 1
+                        else min(lc.stop, boundary_stop)
+                    )
+                    if new_stop != lc.stop:
+                        old_stop = lc.stop
+                        lc.stop = new_stop
+                        self.store.update_state(lc.signal_id, lc.state())
+                        self.execution_revision += 1
+                        self.last_gate = "ema12_cross_stop_tightened"
+                        self.audit.event(
+                            "ema_cross_stop_tightened",
+                            signal_id=lc.signal_id,
+                            old_stop=old_stop,
+                            new_stop=new_stop,
+                            range_boundary=boundary_stop,
+                            bar=completed_ts,
+                        )
+                        self.notify(
+                            f"🛡️ **#{lc.signal_id} EMA12/EMA20 CROSS | "
+                            f"MNQ {lc.side.upper()} · {lc.session}**\n"
+                            f"Trade remains open · SL `{old_stop:.2f}` → "
+                            f"`{new_stop:.2f}` at the broken range boundary"
+                        )
             if (
                 self.lifecycle is not None
                 and self.cfg.flat_at_end

@@ -32,7 +32,7 @@ class StrategyConfig:
     contracts: int = 10
     max_trades: int = 1
     ema_len: int = 20
-    fast_ema_len: int = 15
+    fast_ema_len: int = 12
     min_rr: float = 0.0
     flat_at_end: bool = True
     target_deviations: tuple[float, float, float] = (1.28, 2.01, 2.51)
@@ -99,7 +99,7 @@ class OrderCandidate:
     break_low: float
     break_close: float
     ema20: float
-    ema15: float
+    ema12: float
     vwap: float
     deviation: float
 
@@ -113,6 +113,8 @@ class OrderCandidate:
         values = dict(raw)
         values["armed_at"] = pd.Timestamp(values["armed_at"])
         values["targets"] = tuple(values["targets"])
+        if "ema12" not in values and "ema15" in values:
+            values["ema12"] = values.pop("ema15")
         return cls(**values)
 
 
@@ -148,7 +150,7 @@ def add_indicators(frame_5m: pd.DataFrame, cfg: StrategyConfig) -> pd.DataFrame:
     """Pine-equivalent closed-bar EMA and exchange-day VWAP statistics."""
     out = frame_5m.copy()
     out["ema20"] = out["close"].ewm(span=cfg.ema_len, adjust=False).mean()
-    out["ema15"] = out["close"].ewm(span=cfg.fast_ema_len, adjust=False).mean()
+    out["ema12"] = out["close"].ewm(span=cfg.fast_ema_len, adjust=False).mean()
     out["hl2"] = (out["high"] + out["low"]) / 2.0
     volume = out["volume"].fillna(0.0).astype(float)
     day = pd.Index(out.index.tz_convert(cfg.exchange_timezone).date)
@@ -307,7 +309,7 @@ class SessionRangeEma:
                 break_low=float(state.break_low),
                 break_close=float(state.break_close),
                 ema20=float(bar["ema20"]),
-                ema15=float(bar["ema15"]),
+                ema12=float(bar["ema12"]),
                 vwap=vwap,
                 deviation=deviation,
             )

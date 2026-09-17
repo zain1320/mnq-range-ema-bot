@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -24,7 +25,7 @@ def bar(
     low: float = 98.0,
     close: float = 101.0,
     ema: float = 100.0,
-    ema15: float = 101.0,
+    ema12: float = 101.0,
     vwap: float = 101.0,
     deviation: float = 2.0,
 ) -> pd.Series:
@@ -35,7 +36,7 @@ def bar(
         "close": close,
         "volume": 100,
         "ema20": ema,
-        "ema15": ema15,
+        "ema12": ema12,
         "vwap": vwap,
         "deviation": deviation,
     })
@@ -62,7 +63,7 @@ def candidate(**overrides) -> OrderCandidate:
         "break_low": 101.0,
         "break_close": 103.0,
         "ema20": 100.0,
-        "ema15": 101.0,
+        "ema12": 101.0,
         "vwap": 102.0,
         "deviation": 2.0,
     }
@@ -322,6 +323,51 @@ class AdapterTests(TempDataMixin, unittest.TestCase):
         self.assertEqual(row["exit_reason"], "target3")
         self.assertEqual(row["pnl_usd"], 178.0)
         adapter.close()
+
+    def test_ema12_cross_tightens_to_range_boundary_without_exiting(self):
+        messages = []
+        adapter = SessionRangeEmaAdapter(messages.append)
+        adapter.pending = candidate()
+        adapter.on_tick(pd.Timestamp("2026-01-06 15:00:01", tz="UTC"), 100.0)
+        state = adapter.engine.states["NY"]
+        state.in_window = True
+        state.window_date = "2026-01-06"
+        state.range_high = 99.0
+        state.range_low = 95.0
+        state.range_ts = candidate().range_ts
+        state.direction = 1
+        state.trades = 1
+        adapter.bootstrapped = True
+        index = pd.date_range(
+            end=pd.Timestamp("2026-01-06 11:00", tz="America/New_York"),
+            periods=20,
+            freq="5min",
+        )
+        indicators = pd.DataFrame({
+            "open": [102.0] * 20,
+            "high": [103.0] * 20,
+            "low": [99.0] * 20,
+            "close": [102.0] * 19 + [100.0],
+            "volume": [100.0] * 20,
+            "ema12": [102.0] * 19 + [100.0],
+            "ema20": [101.0] * 20,
+            "vwap": [102.0] * 20,
+            "deviation": [2.0] * 20,
+        }, index=index)
+        with patch(
+            "session_range_ema_adapter.add_indicators",
+            return_value=indicators,
+        ):
+            adapter.on_bar(
+                indicators,
+                pd.Timestamp("2026-01-06 11:04", tz="America/New_York"),
+            )
+        lifecycle = adapter.lifecycle
+        last_message = messages[-1]
+        adapter.close()
+        self.assertIsNotNone(lifecycle)
+        self.assertEqual(lifecycle.stop, 99.0)
+        self.assertIn("Trade remains open", last_message)
 
     def test_pending_order_survives_restart(self):
         adapter = SessionRangeEmaAdapter(lambda _: None)

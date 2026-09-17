@@ -261,24 +261,31 @@ def replay(frame: pd.DataFrame, native_5m: pd.DataFrame) -> tuple[pd.DataFrame, 
                 )
                 crossed = previous is not None and (
                     (
-                        float(previous.ema15) >= float(previous.ema20)
-                        and float(current.ema15) < float(current.ema20)
+                        float(previous.ema12) >= float(previous.ema20)
+                        and float(current.ema12) < float(current.ema20)
                     )
                     if position["direction"] == 1
                     else (
-                        float(previous.ema15) <= float(previous.ema20)
-                        and float(current.ema15) > float(current.ema20)
+                        float(previous.ema12) <= float(previous.ema20)
+                        and float(current.ema12) > float(current.ema20)
                     )
                 )
                 session_state = engine.states[position["session"]]
-                exit_reason = (
-                    "ema15_ema20_cross"
-                    if crossed
-                    else (
-                        "session_end"
-                        if session_state.last_bar or not session_state.in_window
-                        else None
+                if crossed:
+                    boundary_stop = (
+                        float(session_state.range_high)
+                        if position["direction"] == 1
+                        else float(session_state.range_low)
                     )
+                    position["stop"] = (
+                        max(position["stop"], boundary_stop)
+                        if position["direction"] == 1
+                        else min(position["stop"], boundary_stop)
+                    )
+                exit_reason = (
+                    "session_end"
+                    if session_state.last_bar or not session_state.in_window
+                    else None
                 )
                 if exit_reason:
                     exit_price = float(current.close)
