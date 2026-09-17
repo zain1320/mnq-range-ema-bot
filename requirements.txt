@@ -1,0 +1,7 @@
+aiohttp
+discord.py
+httpx
+numpy
+pandas
+project-x-py
+pytz

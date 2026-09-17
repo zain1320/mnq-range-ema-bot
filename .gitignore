@@ -1,0 +1,7 @@
+.env.forward-test
+.env
+.env.*
+!env.example
+__pycache__/
+tests/__pycache__/
+runtime/
